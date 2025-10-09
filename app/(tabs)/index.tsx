@@ -1,75 +1,364 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ColorValue } from 'react-native';
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+import { apiRoutes } from '@/constants/api';
+
+import {
+  Dimensions,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+
+const { width } = Dimensions.get('window');
+
+interface DashboardOption {
+  id: string;
+  title: string;
+  icon: string;
+  color: readonly [ColorValue, ColorValue];
+  description: string;
+}
+
+const dashboardOptions: DashboardOption[] = [
+  {
+    id: 'pendientes',
+    title: 'Pendientes',
+    icon: 'checkmark-circle-outline',
+    color: ['#3B82F6', '#2563EB'],
+    description: 'Tareas y recordatorios'
+  },
+  {
+    id: 'lista-super',
+    title: 'Lista de Super',
+    icon: 'basket-outline',
+    color: ['#10B981', '#059669'],
+    description: 'Gestiona tu lista de compras'
+  },
+  {
+    id: 'calendario',
+    title: 'Calendario',
+    icon: 'calendar-outline',
+    color: ['#8B5CF6', '#7C3AED'],
+    description: 'Agenda y eventos'
+  },
+  {
+    id: 'notas',
+    title: 'Notas',
+    icon: 'document-text-outline',
+    color: ['#F59E0B', '#D97706'],
+    description: 'Ideas y apuntes r�pidos'
+  },
+];
 
 export default function HomeScreen() {
+  const router = useRouter();
+  
+  const [todayEventsCount, setTodayEventsCount] = useState<number | null>(null);
+  const [eventsLoading, setEventsLoading] = useState(false);
+
+  const todayId = useMemo(() => {
+    const now = new Date();
+    return now.toISOString().slice(0, 10);
+  }, []);
+
+  const fetchTodayEvents = useCallback(async () => {
+    const url = apiRoutes.calendar(`?startDate=${todayId}&endDate=${todayId}`);
+    const response = await fetch(url);
+    const json = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(json?.message || 'No se pudo obtener los eventos de hoy');
+    }
+    const items = Array.isArray(json?.data) ? json.data : [];
+    return items.length;
+  }, [todayId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
+      setEventsLoading(true);
+
+      fetchTodayEvents()
+        .then(count => {
+          if (isMounted) {
+            setTodayEventsCount(count);
+          }
+        })
+        .catch(error => {
+          console.error('[HOME] fetch today events error', error);
+          if (isMounted) {
+            setTodayEventsCount(0);
+          }
+        })
+        .finally(() => {
+          if (isMounted) {
+            setEventsLoading(false);
+          }
+        });
+
+      return () => {
+        isMounted = false;
+      };
+    }, [fetchTodayEvents])
+  );
+
+  const handleTodayEventsPress = useCallback(() => {
+    router.push({ pathname: '/calendario', params: { date: todayId } });
+  }, [router, todayId]);
+
+  const handleOptionPress = (optionId: string) => {
+    console.log(`Pressed: ${optionId}`);
+    if (optionId === 'pendientes') {
+      router.push('/pendientes');
+      return;
+    }
+    if (optionId === 'lista-super') {
+      router.push('/lista-super');
+      return;
+    }
+    if (optionId === 'calendario') {
+      router.push('/calendario');
+      return;
+    }
+    if (optionId === 'notas') {
+      router.push('/notas');
+      return;
+    }
+    // Aquí después agregarás navegación a cada pantalla
+  };
+
+  const renderDashboardCard = (option: DashboardOption, index: number) => (
+    <TouchableOpacity
+      key={option.id}
+      style={[
+        styles.dashboardCard,
+        { marginRight: (index + 1) % 2 === 0 ? 0 : 12 }
+      ]}
+      onPress={() => handleOptionPress(option.id)}
+      activeOpacity={0.7}
+    >
+      <LinearGradient
+        colors={option.color}
+        style={styles.cardGradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <View style={styles.cardContent}>
+          <View style={styles.iconContainer}>
+            <Ionicons 
+              name={option.icon as any} 
+              size={32} 
+              color="white" 
+            />
+          </View>
+          <Text style={styles.cardTitle}>{option.title}</Text>
+          <Text style={styles.cardDescription}>{option.description}</Text>
+        </View>
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    <SafeAreaView style={styles.container}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greeting}>¡Hola! V-1.1</Text>
+            <Text style={styles.welcomeText}>Bienvenido a tu Dashboard Dina</Text>
+          </View>
+          <View style={styles.profileContainer}>
+            <LinearGradient
+              colors={['#6366F1', '#8B5CF6']}
+              style={styles.profileAvatar}
+            >
+              <Ionicons name="person" size={24} color="white" />
+            </LinearGradient>
+          </View>
+        </View>
+
+        {/* Dashboard Cards */}
+        <View style={styles.cardsSection}>
+          <Text style={styles.sectionTitle}>¿Que quieres hacer hoy?</Text>
+          
+          <View style={styles.cardsGrid}>
+            {dashboardOptions.map((option, index) => 
+              renderDashboardCard(option, index)
+            )}
+          </View>
+        </View>
+
+        {/* Quick Stats */}
+        <View style={styles.statsSection}>
+          <Text style={styles.sectionTitle}>Resumen de hoy</Text>
+          <View style={styles.statsContainer}>
+            <View style={styles.statCard}>
+              <Ionicons name="checkmark-done" size={20} color="#10B981" />
+              <Text style={styles.statNumber}>5</Text>
+              <Text style={styles.statLabel}>Completadas</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Ionicons name="time-outline" size={20} color="#F59E0B" />
+              <Text style={styles.statNumber}>3</Text>
+              <Text style={styles.statLabel}>Pendientes</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.statCard}
+              onPress={handleTodayEventsPress}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="calendar" size={20} color="#8B5CF6" />
+              <Text style={styles.statNumber}>{eventsLoading ? '...' : (todayEventsCount ?? 0)}</Text>
+              <Text style={styles.statLabel}>Eventos</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 20,
+    paddingBottom: 100, // Espacio para las tabs
+  },
+  header: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
+    marginBottom: 32,
+    paddingTop: 10,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  greeting: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#1F2937',
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  welcomeText: {
+    fontSize: 16,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  profileContainer: {
+    alignItems: 'center',
+  },
+  profileAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  cardsSection: {
+    marginBottom: 32,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 16,
+  },
+  cardsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  dashboardCard: {
+    width: (width - 52) / 2, // 52 = padding lateral + gap
+    marginBottom: 16,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  cardGradient: {
+    borderRadius: 16,
+    padding: 20,
+    minHeight: 140,
+  },
+  cardContent: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  iconContainer: {
+    marginBottom: 12,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+    marginBottom: 4,
+  },
+  cardDescription: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.8)',
+    lineHeight: 16,
+  },
+  statsSection: {
+    marginBottom: 20,
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  statNumber: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#1F2937',
+    marginTop: 8,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 4,
   },
 });
+
+
+
+
+
+
+
+
+
+
+
