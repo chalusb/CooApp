@@ -44,6 +44,7 @@ const ENDPOINTS = {
   CALENDAR: 'calendar',
   NOTES: 'notes',
   NOTIFICATIONS: 'notifications',
+  DEBTS: 'debts',
 };
 
 export const API_CONFIG = {
@@ -68,5 +69,10 @@ export const apiRoutes = {
   note: (noteId: string) => `${API_ROOT}/${ENDPOINTS.NOTES}/${noteId}`,
   notificationsRegister: () => `${API_ROOT}/${ENDPOINTS.NOTIFICATIONS}/register`,
   notificationsBroadcast: () => `${API_ROOT}/${ENDPOINTS.NOTIFICATIONS}/broadcast`,
+  notificationsDevices: () => `${API_ROOT}/${ENDPOINTS.NOTIFICATIONS}/devices`,
+  notificationsMessages: (query: string = '') => `${API_ROOT}/${ENDPOINTS.NOTIFICATIONS}/messages${query}`,
+  notificationsSendMessage: () => `${API_ROOT}/${ENDPOINTS.NOTIFICATIONS}/messages`,
+  notificationsDevice: (deviceId: string) => `${API_ROOT}/${ENDPOINTS.NOTIFICATIONS}/devices/${deviceId}`,
+  debts: (query: string = '') => `${API_ROOT}/${ENDPOINTS.DEBTS}${query}`,
+  debt: (debtId: string) => `${API_ROOT}/${ENDPOINTS.DEBTS}/${debtId}`,
 };
-

@@ -18,8 +18,8 @@ import {
   View,
 } from 'react-native';
 
-import * as Notifications from 'expo-notifications';
 import HeroHeader from '@/components/HeroHeader';
+import * as Notifications from 'expo-notifications';
 
 export const options = {
   headerShown: false,
@@ -56,6 +56,7 @@ const CALENDAR_NOTIFICATION_SOUND = 'notifications.wav';
 const ANDROID_NOTIFICATION_CHANNEL = 'reminders';
 const MIN_TRIGGER_WINDOW_MS = 5_000;
 const MIN_SECONDS_WINDOW = Math.ceil(MIN_TRIGGER_WINDOW_MS / 1000);
+const ENABLE_CALENDAR_NOTIFICATIONS = false;
 
 
 function parseStartTime(value?: string | null): { hours: number; minutes: number } | null {
@@ -252,6 +253,10 @@ export default function CalendarScreen() {
       detailsOverride?: EventNotificationDetails,
       options: { skipPermissionCheck?: boolean } = {}
     ) => {
+      if (!ENABLE_CALENDAR_NOTIFICATIONS) {
+        return null;
+      }
+
       const details = detailsOverride ?? buildEventNotificationDetails(event);
       if (!details) {
         return null;
@@ -280,7 +285,7 @@ export default function CalendarScreen() {
       const trigger: Notifications.NotificationTriggerInput =
         Platform.OS === 'android'
           ? { seconds: secondsUntilTrigger, channelId: ANDROID_NOTIFICATION_CHANNEL }
-          : details.triggerDate;
+          : { type: Notifications.SchedulableTriggerInputTypes.DATE, date: details.triggerDate };
 
       try {
         const identifier = await Notifications.scheduleNotificationAsync({
@@ -296,14 +301,14 @@ export default function CalendarScreen() {
           },
           trigger,
         });
-        console.log('[CALENDAR] notification scheduled', {
-          eventId: event.id,
-          identifier,
-          triggerAt: details.triggerDate.toISOString(),
-        });
+        // console.log('[CALENDAR] notification scheduled', {
+        //   eventId: event.id,
+        //   identifier,
+        //   triggerAt: details.triggerDate.toISOString(),
+        // });
         return identifier;
       } catch (error) {
-        console.error('[CALENDAR] schedule notification error', error);
+        // console.error('[CALENDAR] schedule notification error', error);
         return null;
       }
     },
@@ -314,6 +319,10 @@ export default function CalendarScreen() {
     async (eventsList: CalendarEvent[]) => {
       try {
         await Notifications.cancelAllScheduledNotificationsAsync();
+
+        if (!ENABLE_CALENDAR_NOTIFICATIONS) {
+          return;
+        }
 
         if (!eventsList || eventsList.length === 0) {
           return;
@@ -356,11 +365,11 @@ export default function CalendarScreen() {
     try {
       setError(null);
       const url = apiRoutes.calendar();
-      console.log('[CALENDAR] fetch ->', url);
+      //console.log('[CALENDAR] fetch ->', url);
       const response = await fetch(url);
       const json = await response.json().catch(() => null);
-      console.log('[CALENDAR] create <-', response.status, json);
-      console.log('[CALENDAR] fetch <-', response.status, json);
+      //console.log('[CALENDAR] create <-', response.status, json);
+      //console.log('[CALENDAR] fetch <-', response.status, json);
       if (!response.ok) {
         throw new Error(json?.message || 'No se pudo obtener el calendario');
       }
@@ -449,14 +458,14 @@ export default function CalendarScreen() {
 
     try {
       setSaving(true);
-      console.log('[CALENDAR] submit ->', { isEditing, url, payload });
+      //console.log('[CALENDAR] submit ->', { isEditing, url, payload });
       const response = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const json = await response.json().catch(() => null);
-      console.log('[CALENDAR] submit <-', response.status, json);
+      //console.log('[CALENDAR] submit <-', response.status, json);
       if (!response.ok) {
         throw new Error(json?.message || errorMessage);
       }
@@ -485,10 +494,10 @@ export default function CalendarScreen() {
         onPress: async () => {
           try {
             const url = apiRoutes.calendarEvent(eventId);
-            console.log('[CALENDAR] delete ->', { url, eventId });
+            //console.log('[CALENDAR] delete ->', { url, eventId });
             const response = await fetch(url, { method: 'DELETE' });
             const json = await response.json().catch(() => null);
-            console.log('[CALENDAR] delete <-', response.status, json);
+            //console.log('[CALENDAR] delete <-', response.status, json);
             if (!response.ok) {
               throw new Error(json?.message || 'No se pudo eliminar el evento');
             }

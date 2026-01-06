@@ -1,10 +1,15 @@
-import { Ionicons } from '@expo/vector-icons';
+﻿import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ColorValue } from 'react-native';
 
-import { apiRoutes } from '@/constants/api';
+import { API_CONFIG, apiRoutes } from '@/constants/api';
+import { getCategoriesCache, isCategoriesCacheFresh, setCategoriesCache } from '@/core/cache/categoriesCache';
+import { normalizeCategory } from '@/core/categories/normalizers';
+import { computeDebtBalance, normalizeDebtEntry } from '@/core/debts/normalizers';
+import type { Category, Task } from '@/types/categories';
+import type { DebtEntry } from '@/types/debts';
 
 import {
   Dimensions,
@@ -53,19 +58,116 @@ const dashboardOptions: DashboardOption[] = [
     title: 'Notas',
     icon: 'document-text-outline',
     color: ['#F59E0B', '#D97706'],
-    description: 'Ideas y apuntes r�pidos'
+    description: 'Ideas y apuntes rapidos'
+  },
+  {
+    id: 'deuda',
+    title: 'Deuda',
+    icon: 'wallet-outline',
+    color: ['#F87171', '#EF4444'],
+    description: 'Controla prestamos y abonos'
   },
 ];
+
+type PendingSummary = {
+  pending: number;
+  completed: number;
+};
+
+type DebtSummary = {
+  balance: number;
+  totalDeudas: number;
+  totalAbonos: number;
+};
+
+const summarizeCategories = (categories: Category[]): PendingSummary => {
+  return categories.reduce(
+    (acc, category) => {
+      category.tasks.forEach((task: Task) => {
+        const normalizedStatus = typeof task.status === 'string' ? task.status.toLowerCase() : 'pendiente';
+        if (normalizedStatus === 'completada' || normalizedStatus === 'completed' || normalizedStatus === 'done') {
+          acc.completed += 1;
+        } else {
+          acc.pending += 1;
+        }
+      });
+      return acc;
+    },
+    { pending: 0, completed: 0 }
+  );
+};
+
+const formatCurrency = (value: number) => {
+  try {
+    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(value);
+  } catch {
+    return `$${value.toFixed(2)}`;
+  }
+};
+
 
 export default function HomeScreen() {
   const router = useRouter();
   
+  const [pendingSummary, setPendingSummary] = useState<PendingSummary>({ pending: 0, completed: 0 });
+  const [pendingLoading, setPendingLoading] = useState(true);
+  const [debtSummary, setDebtSummary] = useState<DebtSummary>({ balance: 0, totalDeudas: 0, totalAbonos: 0 });
+  const [debtLoading, setDebtLoading] = useState(true);
   const [todayEventsCount, setTodayEventsCount] = useState<number | null>(null);
   const [eventsLoading, setEventsLoading] = useState(false);
 
   const todayId = useMemo(() => {
     const now = new Date();
     return now.toISOString().slice(0, 10);
+  }, []);
+
+  const fetchPendingSummary = useCallback(async (): Promise<PendingSummary> => {
+    const cacheSnapshot = getCategoriesCache();
+    if (cacheSnapshot?.data?.length && isCategoriesCacheFresh()) {
+      return summarizeCategories(cacheSnapshot.data);
+    }
+
+    if (!API_CONFIG.API_ROOT) {
+      return { pending: 0, completed: 0 };
+    }
+
+    const response = await fetch(apiRoutes.categories('?includeTasks=true'));
+    const json = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      throw new Error(json?.message || 'No se pudo obtener el número de pendientes');
+    }
+
+    const rawCategories = Array.isArray(json?.data) ? json.data : [];
+    const normalized = rawCategories
+      .map((rawCategory: unknown) => normalizeCategory(rawCategory))
+      .filter((category: Category) => Boolean(category.id));
+
+    if (normalized.length) {
+      setCategoriesCache(normalized);
+    }
+
+    return summarizeCategories(normalized);
+  }, []);
+
+  const fetchDebtSummary = useCallback(async (): Promise<DebtSummary> => {
+    if (!API_CONFIG.API_ROOT) {
+      return { balance: 0, totalDeudas: 0, totalAbonos: 0 };
+    }
+
+    const response = await fetch(apiRoutes.debts('?order=-date'));
+    const json = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      throw new Error(json?.message || 'No se pudo obtener el balance de deuda');
+    }
+
+    const rawEntries = Array.isArray(json?.data) ? json.data : [];
+    const normalized = rawEntries
+      .map((entry: unknown) => normalizeDebtEntry(entry))
+      .filter((entry: DebtEntry | null | undefined): entry is DebtEntry => Boolean(entry));
+
+    return computeDebtBalance(normalized);
   }, []);
 
   const fetchTodayEvents = useCallback(async () => {
@@ -78,6 +180,71 @@ export default function HomeScreen() {
     const items = Array.isArray(json?.data) ? json.data : [];
     return items.length;
   }, [todayId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
+      const cacheSnapshot = getCategoriesCache();
+      if (cacheSnapshot?.data?.length && isCategoriesCacheFresh()) {
+        const summary = summarizeCategories(cacheSnapshot.data);
+        setPendingSummary(summary);
+        setPendingLoading(false);
+      } else {
+        setPendingLoading(true);
+      }
+
+      fetchPendingSummary()
+        .then(summary => {
+          if (isMounted) {
+            setPendingSummary(summary);
+          }
+        })
+        .catch(error => {
+          console.error('[HOME] fetch pending summary error', error);
+          if (isMounted) {
+            setPendingSummary({ pending: 0, completed: 0 });
+          }
+        })
+        .finally(() => {
+          if (isMounted) {
+            setPendingLoading(false);
+          }
+        });
+
+      return () => {
+        isMounted = false;
+      };
+    }, [fetchPendingSummary])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
+      setDebtLoading(true);
+
+      fetchDebtSummary()
+        .then(summary => {
+          if (isMounted) {
+            setDebtSummary(summary);
+          }
+        })
+        .catch(error => {
+          console.error('[HOME] fetch debt summary error', error);
+          if (isMounted) {
+            setDebtSummary({ balance: 0, totalDeudas: 0, totalAbonos: 0 });
+          }
+        })
+        .finally(() => {
+          if (isMounted) {
+            setDebtLoading(false);
+          }
+        });
+
+      return () => {
+        isMounted = false;
+      };
+    }, [fetchDebtSummary])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -112,6 +279,10 @@ export default function HomeScreen() {
     router.push({ pathname: '/calendario', params: { date: todayId } });
   }, [router, todayId]);
 
+  const handleDebtPress = useCallback(() => {
+    router.push('/deuda');
+  }, [router]);
+
   const handleOptionPress = (optionId: string) => {
     console.log(`Pressed: ${optionId}`);
     if (optionId === 'pendientes') {
@@ -130,7 +301,11 @@ export default function HomeScreen() {
       router.push('/notas');
       return;
     }
-    // Aquí después agregarás navegación a cada pantalla
+    if (optionId === 'deuda') {
+      router.push('/deuda');
+      return;
+    }
+    // Aqu+¡ despu+®s agregar+ís navegaci+¦n a cada pantalla
   };
 
   const renderDashboardCard = (option: DashboardOption, index: number) => (
@@ -174,7 +349,7 @@ export default function HomeScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>¡Hola! V-1.1</Text>
+            <Text style={styles.greeting}>Hola V-1.6</Text>
             <Text style={styles.welcomeText}>Bienvenido a tu Dashboard Dina</Text>
           </View>
           <View style={styles.profileContainer}>
@@ -189,7 +364,7 @@ export default function HomeScreen() {
 
         {/* Dashboard Cards */}
         <View style={styles.cardsSection}>
-          <Text style={styles.sectionTitle}>¿Que quieres hacer hoy?</Text>
+          <Text style={styles.sectionTitle}>Que quieres hacer hoy?</Text>
           
           <View style={styles.cardsGrid}>
             {dashboardOptions.map((option, index) => 
@@ -201,22 +376,51 @@ export default function HomeScreen() {
         {/* Quick Stats */}
         <View style={styles.statsSection}>
           <Text style={styles.sectionTitle}>Resumen de hoy</Text>
-          <View style={styles.statsContainer}>
-            <View style={styles.statCard}>
-              <Ionicons name="checkmark-done" size={20} color="#10B981" />
-              <Text style={styles.statNumber}>5</Text>
+        <View style={styles.statsContainer}>
+          <View style={styles.statCard}>
+            <Ionicons name="checkmark-done" size={20} color="#10B981" />
+            <Text style={styles.statNumber}>
+              {pendingLoading ? '...' : pendingSummary.completed}
+              </Text>
               <Text style={styles.statLabel}>Completadas</Text>
             </View>
             <View style={styles.statCard}>
-              <Ionicons name="time-outline" size={20} color="#F59E0B" />
-              <Text style={styles.statNumber}>3</Text>
-              <Text style={styles.statLabel}>Pendientes</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.statCard}
-              onPress={handleTodayEventsPress}
-              activeOpacity={0.8}
+            <Ionicons name="time-outline" size={20} color="#F59E0B" />
+            <Text style={styles.statNumber}>
+              {pendingLoading ? '...' : pendingSummary.pending}
+            </Text>
+            <Text style={styles.statLabel}>Pendientes</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.statCard}
+            onPress={handleDebtPress}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name="wallet-outline"
+              size={20}
+              color={!debtLoading && debtSummary.balance < 0 ? '#10B981' : '#EF4444'}
+            />
+            <Text
+              style={[
+                styles.statNumber,
+                !debtLoading &&
+                  (debtSummary.balance > 0
+                    ? styles.statNumberDebtOwed
+                    : debtSummary.balance < 0
+                    ? styles.statNumberDebtFavor
+                    : styles.statNumberDebtNeutral),
+              ]}
             >
+              {debtLoading ? '...' : formatCurrency(debtSummary.balance)}
+            </Text>
+            <Text style={styles.statLabel}>Balance deuda</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.statCard}
+            onPress={handleTodayEventsPress}
+            activeOpacity={0.8}
+          >
               <Ionicons name="calendar" size={20} color="#8B5CF6" />
               <Text style={styles.statNumber}>{eventsLoading ? '...' : (todayEventsCount ?? 0)}</Text>
               <Text style={styles.statLabel}>Eventos</Text>
@@ -324,11 +528,12 @@ const styles = StyleSheet.create({
   },
   statsContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     gap: 12,
   },
   statCard: {
-    flex: 1,
+    width: (width - 64) / 2,
     backgroundColor: 'white',
     borderRadius: 12,
     padding: 16,
@@ -345,20 +550,20 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     marginTop: 8,
   },
+  statNumberDebtOwed: {
+    color: '#EF4444',
+  },
+  statNumberDebtFavor: {
+    color: '#10B981',
+  },
+  statNumberDebtNeutral: {
+    color: '#6366F1',
+  },
   statLabel: {
     fontSize: 12,
     color: '#6B7280',
     marginTop: 4,
   },
 });
-
-
-
-
-
-
-
-
-
 
 
